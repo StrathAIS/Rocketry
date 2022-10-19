@@ -1,0 +1,40 @@
+CAD Folder Organisation
+
+Suggested file naming format [TYPE][VERSION_NO]-[SUBGROUP]-[PART_NAME]
+TYPE = p-part , a-assembly, d-drawing
+VERSION_NO = design interation e.g. 1,2,3...
+SUBGROUP = main , elec , prop , reco , struc
+PART_NAME = e.g ogive_nose_cone_body
+
+Example:
+p1-struc-ogive_nose_cone_body.SLDPRT
+
+Folder structure
+- subfolder
+# file
+
+/CAD
+ | -Electronics
+ | -Fixtures
+ |  | #standard bolts, nuts, washers etc
+ | -Propulsion
+ |   -Motor Parts
+ |   #Motor Assembly
+ | -Recovery
+ |  | -parachutes
+ |  | -piston
+ |  | -quick link
+ |  | -tender descender
+ |   #other parts
+ |   #assemblies
+ | -Structures
+ |  | -Airframe
+ |  | -Avionics Bay
+ |  | -Payload Bay
+ |  #Airframe Assembly
+ |  #Avionics Bay Assembly
+ |  #Payload Bay Assembly
+ |
+ #Full Rocket Assembly File.SDLASM
+/
+
