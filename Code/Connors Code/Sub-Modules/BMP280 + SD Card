@@ -1,0 +1,196 @@
+
+
+//BMP280
+#include <Wire.h>
+#include <SPI.h>
+#include <Adafruit_BMP280.h>
+
+
+// SD Card
+#include "FS.h"
+#include "SD.h"
+
+SPIClass sdSPI(HSPI);
+
+#define SD_CS 13
+#define SD_CLK 14
+#define SD_MOSI 15
+#define SD_MISO 2
+
+
+//#define BMP_SCK  (13)
+//#define BMP_MISO (12)
+//#define BMP_MOSI (11)
+//#define BMP_CS   (10)
+
+Adafruit_BMP280 bmp; // I2C
+//Adafruit_BMP280 bmp(BMP_CS); // hardware SPI
+//Adafruit_BMP280 bmp(BMP_CS, BMP_MOSI, BMP_MISO,  BMP_SCK);
+
+
+
+void setupSD(void);
+void writeFile(fs::FS &fs, const char,const char);
+void appendFile(fs::FS &fs, const char , const char);
+void log_SD(void);
+
+
+char csv_buffer[100];
+float secs =0;
+char secs_c[10];
+
+float altitude;
+char altitude_c[10];
+void setup() {
+  Serial.begin(9600);
+
+  delay(3000);
+
+  setupSD();
+
+  Serial.println("Do something");
+  while ( !Serial ) delay(100);   // wait for native usb
+  Serial.println(F("BMP280 test"));
+  unsigned status;
+  status = bmp.begin(0x76);
+  //status = bmp.begin();
+  if (!status) {
+    Serial.println(F("Could not find a valid BMP280 sensor, check wiring or "
+                      "try a different address!"));
+    Serial.print("SensorID was: 0x"); Serial.println(bmp.sensorID(),16);
+    Serial.print("        ID of 0xFF probably means a bad address, a BMP 180 or BMP 085\n");
+    Serial.print("   ID of 0x56-0x58 represents a BMP 280,\n");
+    Serial.print("        ID of 0x60 represents a BME 280.\n");
+    Serial.print("        ID of 0x61 represents a BME 680.\n");
+    while (1) delay(10);
+  }
+
+  /* Default settings from datasheet. */
+  bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,     /* Operating Mode. */
+                  Adafruit_BMP280::SAMPLING_X2,     /* Temp. oversampling */
+                  Adafruit_BMP280::SAMPLING_X16,    /* Pressure oversampling */
+                  Adafruit_BMP280::FILTER_X16,      /* Filtering. */
+                  Adafruit_BMP280::STANDBY_MS_500); /* Standby time. */
+}
+
+void loop() {
+    Serial.print(F("Temperature = "));
+    Serial.print(bmp.readTemperature());
+    Serial.println(" *C");
+
+    Serial.print(F("Pressure = "));
+    Serial.print(bmp.readPressure());
+    Serial.println(" Pa");
+
+    Serial.print(F("Approx altitude = "));
+    Serial.print(bmp.readAltitude(99612.77)); /* Adjusted to local forecast! */
+    Serial.println(" m");
+
+    altitude = bmp.readAltitude(99612.77);
+
+    Serial.println();
+
+    sprintf(secs_c, "%g", secs);
+    sprintf(altitude_c, "%g", altitude); // "%g correct?? 
+
+    Serial.print("Altitude_c=");
+    Serial.println(altitude_c);
+ 
+
+    // 'Time, Altitude
+
+    strcpy(csv_buffer, "");
+    strcat(csv_buffer, secs_c);
+    strcat(csv_buffer, ",");
+    strcat(csv_buffer, altitude_c); // \r\n
+    strcat(csv_buffer, "\r\n");
+
+    Serial.println(csv_buffer);
+    
+
+    appendFile(SD, "/data.txt", csv_buffer);
+
+    secs = secs + 0.5;
+    
+    delay(2000);
+
+
+
+    
+}
+
+void setupSD() {
+  
+  Serial.println("Initializing SD card...");
+sdSPI.begin(SD_CLK, SD_MISO, SD_MOSI, SD_CS);
+if (!SD.begin(SD_CS, sdSPI)) {
+
+Serial.println("Card Mount Failed");
+
+
+
+}
+
+else
+
+{
+Serial.println("Success");
+
+}
+uint8_t cardType = SD.cardType();
+if(cardType == CARD_NONE) {
+  Serial.println("No SD card attached");
+
+
+}
+
+File file = SD.open("/data.txt");
+  if(!file) {
+    Serial.println("File doens't exist");
+    Serial.println("Creating file...");
+    writeFile(SD, "/data.txt", "Time, Lat, Lon, Alt (BMP280), Alt (BMP388), Accel (m/s/s) \r\n");
+  }
+  else {
+    Serial.println("File already exists");  
+  }
+  file.close();
+
+}
+
+void appendFile(fs::FS &fs, const char * path, const char * message) {
+  Serial.printf("Appending to file: %s\n", path);
+
+  File file = fs.open(path, FILE_APPEND);
+  if(!file) {
+    Serial.println("Failed to open file for appending");
+   
+    return;
+  }
+  if(file.print(message)) {
+    Serial.println("Message appended");
+  } else {
+    Serial.println("Append failed");
+ 
+  }
+  file.close();
+}
+
+
+void writeFile(fs::FS &fs, const char * path, const char * message) {
+  Serial.printf("Writing file: %s\n", path);
+
+  File file = fs.open(path, FILE_WRITE);
+  if(!file) {
+    Serial.println("Failed to open file for writing");
+    
+    return;
+  }
+  if(file.print(message)) {
+    Serial.println("File written");
+  } else {
+    Serial.println("Write failed");
+   
+  }
+  file.close();
+}
+
