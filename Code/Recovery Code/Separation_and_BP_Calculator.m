@@ -6,7 +6,7 @@ clear;
 %input
 inputValues = inputdlg({"Diameter (m):",'Height (m):','Seperation length (m):','Mass nose (kg):' ...
     ,'Mass body (kg):', 'Shear pin force (N):','Other resistance (N):', ...
-    'Air pressure difference [out - in](Pa):','Ejection velocity (m/s):'});
+    'Air pressure difference [out - in](Pa):','Desired Ejection velocity (m/s):'});
 
 diameter = str2double(inputValues{1});
 height = str2double(inputValues{2});
