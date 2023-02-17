@@ -1,30 +1,26 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Thu Feb 16 17:23:00 2023
-
-@author: tommy
-"""
-
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Feb 14 10:48:17 2023
-
-@author: tommy
-"""
-
 import os
 import math
 import numpy as np
 import sys
-
+import pprint as pp
 import orhelper
 from orhelper import FlightDataType
 
+## MORI: Matlab-OpenRocket Interface
+############# Tommy W ##############
+
+# This script defines functions called by Matlab to interface with Openrocket
+# through python, orhelper and jpype. It functions in python also but can only
+# be called once per python instance. (idk why)
+
+## INPUTS
 # target # Name of target OR file (.ork) as a string e.g. 'Strathosphere_mk2_v5.ork' 
 # component # Name of component as a string, best to copy directly from OR file e.g. 'Trapezoidal fin set'
-# outputType # List of desired outputs, from _enmums.py, supplied at the end of this script
+# command # String representing java command, found in the OR dictionary e.g. 'setThickness'
+# value # Argument of command, if a number should usually be SI, again a string e.g. '0.003'
+# outputType # A list of flightDataType strings, as defined in _enums.py
 
-def runORTweak(target,component,command,value,outputType):
+def runORTweak(target,component,command,value):
     with orhelper.OpenRocketInstance() as instance:
         orh = orhelper.Helper(instance)
     
@@ -33,14 +29,33 @@ def runORTweak(target,component,command,value,outputType):
         sim = doc.getSimulation(0)
         opts = sim.getOptions()
         rocket = sim.getRocket()
-        # Pull fin data out...
+        # Find component
         component = orh.get_component_named(rocket, component)
         # Run Command
         runCommand='component.'+command+'('+value+')'
         eval(runCommand)
-        # Run sim
+        # Save rocket
+        orh.save_doc(os.path.join('../','OpenRocket/',target),doc)
+
+def runORSim(target,outputType):
+    with orhelper.OpenRocketInstance() as instance:
+        orh = orhelper.Helper(instance)
+    
+        # Load document, sim, options and rocket...
+        doc = orh.load_doc(os.path.join('../','OpenRocket/',target))
+        sim = doc.getSimulation(0)
+        opts = sim.getOptions()
         orh.run_simulation(sim)
-        # Pull maximal velocity
-        output=orh.get_timeseries(sim, outputType)
+        outputCommand='orh.get_timeseries(sim,['
+        for i,data in enumerate(outputType):
+            outputCommand=outputCommand+(str(data))+','
+            
+        outputCommand.removesuffix(',')
+        outputCommand=outputCommand+'])'
+        output=eval(outputCommand)
         return output
-vmax=runORTweak(target,component,command,value,outputType)
+if runSim==0:
+    runORTweak(target,component,command,value)
+else:
+    output=runORSim(target,outputType)     
+pp.pprint(output)
