@@ -1,0 +1,12 @@
+List of Part to be Cut from 4mm Sheet
+
+-Aft Centring Ring x2
+-Avionics Bay Bulkhead x2
+-Payload Upper Bulkhead x2
+-Motor Centring Ring x4
+-Payload Lower Bulkhead x1
+-Payload Support x2
+-Forward Closure x1
+-Blank Disc x2
+
+
