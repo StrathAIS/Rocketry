@@ -1,241 +1,286 @@
 /*
-  Main sketch file 
+  AISFCAlphaBuild Main File
+  This program is a stripped down and cleaned version of the AISFCProto code
+  This program is intended to act as a clean reference for future expansion
 
-  This program is for the StrathAIS Flight Computer (AISFC)
-  It combines multiple header files together and dictates the functionality used 
-    **This program is build around the Arduino Mega dev board** 
-    **Please bear this in mind when using this code for other boards**
-    **Pin outs may be different**
-  
-  Created: May 2023
+  Created: 22nd May 2023
   Last Update: 22th May 2023
-  Created By: Michael Haggart 
+  Created By: Michael Haggart
   For: StarthAIS
-  Updated by: Michael Haggart 
-              #Add New Names Here
+  Updated by: Michael Haggart
+			  #Add New Names Here
 */
+//
+//
 
-#include "AISFCGPS.h"
+
+#include "AISFCLED.h"
 #include "AISFCAccelerometer.h"
 #include "AISFCBarometer.h"
-#include "AISFCLED.h"
-#include "AISFCTelecoms.h"
+#include "AISFCCore.h"
 #include "AISFCDataLogging.h"
+#include "AISFCGPS.h"
+//
+//
+#define drogueIgGate 11
+#define drogueIgDrain 12
 
-enum flightStatus { preLaunch,
-                    Boost,
-                    Coast,
-                    Apogee,
-                    Drogue,
-                    Main,
-                    Landed };
-
-Adafruit_MPU6050 mpu1;
-Adafruit_Sensor *mpu1_temp, *mpu1_accel, *mpu1_gyro;
-float x_accel1{}, y_accel1{}, z_accel1{};
-float timeSinceActivate{};
-float baroPressure{}, zAlt{}, baroAlt{}, baroAltFeet{};
-const int mpu1_address = 0x69;
-int32_t latGPS{}, longGPS{};
-int sampleCountAscCheck{};
-float apogeeAlt{}; 
-float absoluteAccel{};
-#define drogueIgPin 3
-#define mainIgPin 4
-flightStatus activeFlightStatus = 0;
-
-SFE_UBLOX_GNSS NEO_M9;
-
-AISFCbaro baro;
-File dataLog;
-
+#define mainIgGate 14
+#define mainIgDrain 13
+//
+/*
+	Mosfet 1 gate - 11
+	Mosfet 1 drain - 12
+	Mosfet 2 drain - 13
+	Mosfet 2 gate - 14
+*/
+#define ledAltIndicator 8
+#define ledStatusIndicator 9
+//
+//
+/*~~Global Variables~~*/
+float timeSinceActive{};
+flightStatus currentFS = flightStatus::preLaunch;
+flightStatus prevFS{};
+bool apogeeCheck_Flag = false;
+bool motorCheck_Flag = false;
+bool drogueDep_Flag = false;
+bool mainDep_Flag = false;
+/*~~End Of Global Variables~~*/
+//
+//
+/*~~Accelerometer Components~~*/
+Adafruit_MPU6050 AISFC_Accel;
+Adafruit_Sensor* ASIFCAccel_temp, * ASIFCAccel_accel, * ASIFCAccel_gyro;
+float accel_x{}, accel_y{}, accel_z{};
+const int AISFCAccel_Address1 = 0x69;  //IF we use a second accelerometer, address would be 0x68
+float AISFCAccel_Mag{};
+int accelSampleCount{};
+/*~~End Of Accelerometer Components~~*/
+//
+//
+/*~~Barometer Components~~*/
+AISFCbaro AISFC_Baro;
+float highest_Alt{};
+int baroSampleCount{};
+float baroPressure{}, zero_Alt{}, current_Alt{}, baroAltFeet{};
+/*~~End Of Barometer Components~~*/
+//
+//
+/*~~LED Indicators~~*/
+Adafruit_NeoPixel AISFCAltIndicator(AISFCLED::NUM_LEDS, ledAltIndicator, NEO_RGBW);
+Adafruit_NeoPixel AISFCStatusIndicator(AISFCLED::NUM_LEDS, ledStatusIndicator, NEO_RGBW);
+/*~~End Of LED Indicators~~*/
+//
+//
+/*~~GPS Components~~*/
+SFE_UBLOX_GNSS AISFCgps;
+long lat_mdeg{}, long_mdeg{}, gnss_alt{};
+long launch_Lat{}, launch_Long{};
+long heading_from_launch{}, distance_from_launch{};
+/*~~End Of GPS Components~~*/
+//
+//
+/*~~Function Defs~~*/
 bool activateHardware();
-int stateCheckFunc(flightStatus& fS, bool apogeeCheck, bool motorCheck, float curAlt) 
-
-void ignitionControl(bool apogeeCheck, uint8_t pin, flightStatus fS);
-bool descendingCheck(int& sampleCount, float& apogeeAlt, float cAlt);
-bool apogeeCheck = false;
-bool motorCheck = false;
-//bool safetyContol(float time, bool apogeeCheck); <- to be expanded
-
-void setup() {
-  // put your setup code here, to run once:
-  Serial.begin(115200);
-  digitalWrite(drogueIgPin, LOW);  // Set Drogue activation pin to Low
-  digitalWrite(mainIgPin, LOW);    // Set Main activation pin to High
-
-  Serial.println("Test bed for Arduino Flight Computer");
-  if (!activateHardware()) {
-    Serial.println("Not all hardware activated successfully, check terminal log for failed device");
-    while (1) {
-      delay(10);
-    }
-  }
-  if (activateHardware()) {
-    Serial.println("Hardware activated successfully");
-  }
-  mpu1.getAccelerometerSensor();
-  // mpu.setHighPassFilter(MPU6050_HIGHPASS_0_63_HZ);
-  // mpu.setMotionDetectionThreshold(1);
-  // mpu.setMotionDetectionDuration(20);
-  // mpu.setInterruptPinLatch(true);	// Keep it latched.  Will turn off when reinitialized.
-  // mpu.setInterruptPinPolarity(true);
-  // mpu.setMotionInterrupt(true);
-  AISFCAccelerometer::getSensors(mpu1, mpu1_accel, mpu1_gyro, mpu1_temp);
-  AISFCDataLogging::dataLogInit(dataLog);
-  zAlt = baro.zeroAlt();
-}
-
-void loop() {
-  // put your main code here, to run repeatedly:
-  AISFCAccelerometer::printSensors(mpu1_address);
-  AISFCAccelerometer::get_xya(mpu1_address, x_accel1, y_accel1, z_accel1);
-  absoluteAccel = AISFCAccelerometer::absoluteAcceleration();
-  motorCheck = AISFCAccelerometer::motorCheckFunction(absoluteAccel);
-  baroPressure = baro.getPressure();
-  baroAlt = baro.curAlt(zAlt);
-  if (apogeeCheck == false) {
-    apogeeCheck = descendingCheck(sampleCountAscCheck, apogeeAlt, baroAlt);
-  }
-  
-  Serial.print("Highest Alt: ");
-  Serial.println(apogeeAlt);
-  baroAltFeet = baro.mtoFeet(baroAlt);
-  Serial.print("Current Alt in Feed: ");
-  Serial.println(baroAltFeet);
-
-  latGPS = NEO_M9.getLatitude();
-  longGPS = NEO_M9.getLongitude();
-  timeSinceActivate = millis();
-
-  //int stateCheckFunc(flightStatus& fS, bool apogeeCheck, bool motorCheck, float curAlt) 
-
-  //milliseconds, pascals, meters, G's?, G's?, G's?, degrees, degrees
-  String entry = AISFCDataLogging::loggedData(timeSinceActivate, baroPressure, baroAlt, x_accel1, y_accel1, z_accel1, longGPS, latGPS);
-  AISFCDataLogging::writeEntry(entry, dataLog);
-}
-
-bool activateHardware() {
-  bool accelFlag01{}, SDFlag{}, gpsFlag{}, baroFlag{};
-  if (!mpu1.begin(mpu1_address)) {
-    Serial.println("Accelerometer 1 failed to activate");
-    accelFlag01 = false;
-  }
-  if (mpu1.begin(mpu1_address)) {
-    Serial.println("Accelerometer 1 activated");
-    accelFlag01 = true;
-  }
-  if (!SD.begin(4)) {
-    Serial.println("SD data logger failed to activate");
-    SDFlag = false;
-  }
-  if (SD.begin(4)) {
-    Serial.println("SD data logger activated");
-    if (dataLog) {
-      dataLog.println("Flight Log");
-    }
-    SDFlag = true;
-  }
-  if (!NEO_M9.begin()) {
-    Serial.println("GPS failed to activate");
-    gpsFlag = false;
-  }
-  if (NEO_M9.begin()) {
-    Serial.println("GPS activated");
-    startGPS(NEO_M9);
-    gpsFlag = true;
-  }
-  if (!baro.begin()) {
-    Serial.println("Barometer failed to activate");
-    baroFlag = false;
-  }
-  if (baro.begin()) {
-    Serial.println("Barometer activated");
-    baroFlag = true;
-  }
-
-  if (accelFlag01 == true && SDFlag == true) {
-    return true;
-  } else {
-    return false;
-  }
-}
-
-int stateCheckFunc(flightStatus& fS, bool apogeeCheck, bool motorCheck, float curAlt) 
+void fsAction(flightStatus currentFS);
+/*~~End Of Function Defs~~*/
+//
+//
+void setup()
 {
-  //The motorCheck is bool derived from the current acceleration of the rocket. If it is above some threshhold, then the motor is currently firing
-  //If this is true, then the rocket is in its boost phase
-  //If this is false && apogeeCheck is false, the rocket is in its Coast phase. 
-  if(apogeeCheck == false && motorCheck == false && curAlt <= 50)
-  {
-    fS = preLaunch;
-    return 0;
-  }
-  if(apogeeCheck == false && motorCheck == true && curAlt >= 10)
-  {
-    fS = Boost; 
-    return 1;
-  }
-  if(apogeeCheck == false && motorCheck == false && curAlt >= 100)
-  {
-    fS = Coast;
-    return 2;
-  }
-  if(apogeeCheck == true && motorCheck == false && curAlt >= 2000)
-  {
-    fS = Apogee;
-    return 3;
-  }
-  //if(apogeeCheck )
+	// put your setup code here, to run once:
+	Serial.begin(9600);
+
+	digitalWrite(drogueIgGate, HIGH);		//<- gate HIGH & drain LOW = no activation
+	digitalWrite(drogueIgDrain, LOW);      
+
+	digitalWrite(mainIgGate, HIGH);  
+	digitalWrite(mainIgDrain, LOW);      
+
+	Serial.println("AISFC prototype");
+	if (!activateHardware())
+	{
+		Serial.println("Not all hardware activated successfully, check terminal log for failed device");
+	}
+	else
+	{
+		Serial.println("Hardware activated successfully");
+	}
+	AISFC_Accel.getAccelerometerSensor();
 }
-
-void ignitionControl(bool apogeeCheck, uint8_t pin, flightStatus fS) {
-  switch (fS) {
-    case 0:       //<- preLaunch
-
-      break;
-    case 1:       //Boost
-
-      break;
-    case 2:       //Coast
-
-      break;
-    case 3:       //Apogee
-    //the change from coast to apogee to drogue should be very short as the drogue should deploy once the apogee is confirmed
-      break;
-    case 4:       //Drogue
-      digitalWrite(drogueIgPin, HIGH);  // Fire the Drogue
-      break;
-    case 5:       //Main
-      digitalWrite(mainIgPin, HIGH);    // Fire the Main
-      break;
-    case 6:       //Landed
-
-      break;
-  }
-}
-
-bool descendingCheck(int& sampleCount, float& apogeeAlt, float cAlt) {
-  if ((apogeeAlt - cAlt) >= 1)  //if current alt is lower than 1 meter below apogee
-  {
-    sampleCount = sampleCount + 1;  //counter increments
-    apogeeAlt = cAlt;               //apogee = current alt
-    if (sampleCount == 15)          //if 15 counts are sucessful return true;
-    {
-      return true;
-    }
-    return false;
-  }
-  if ((apogeeAlt - cAlt) < 1)  //if current alt is greater than 1 meter above apogee
-  {
-    apogeeAlt = apogeeAlt;  //apogee
-    sampleCount = 0;
-    return false;
-  }
-}
-
-
-/*bool safetyContol(float time, bool apogeeCheck)
+//
+//
+void loop()
 {
+	// put your main code here, to run repeatedly:
+	timeSinceActive = millis();																// <- get time since activation
+	
+	/*~~Accelerometer Actions~~*/
+	AISFCAccelerometer::get_xya(AISFCAccel_Address1, accel_x, accel_y, accel_z);			// <- get the xyz accelerations 
+	AISFCAccel_Mag = AISFCAccelerometer::absoluteAcceleration(accel_x, accel_y, accel_z);	// <- create absolute acceleration 
+	if (motorCheck_Flag == false)		// <- if we haven't turned the motor on, check this 
+	{
+		motorCheck_Flag = motorCheckFunction(accelSampleCount, AISFCAccel_Mag);				// <- check if rocket is accelerating due to motorburn //I want to gang this to thermistor but prob too late now
+	}
+	
+	/*~~Barometer Actions~~*/
+	current_Alt = AISFC_Baro.curAlt(zero_Alt);		// <- update current altitude
+	if (highest_Alt < current_Alt)					// <- if the highest altitude is lower than the current altitude, update highest alt
+	{
+		highest_Alt = current_Alt;
+	}
+	if (apogeeCheck_Flag == false)		// <- if we haven't hit the apogee, check if reached
+	{
+		apogeeCheck_Flag = descendingCheck(baroSampleCount, highest_Alt, current_Alt);			// <- check if apogee has been hit 
+	}
+	
+	//Final Action of Current Loop, set current flight status, and if that's changed, update action
+	currentFS = stateCheckFunc(currentFS, timeSinceActive, apogeeCheck_Flag, drogueDep_Flag, mainDep_Flag, motorCheck_Flag, highest_Alt, current_Alt);
+	if (currentFS != prevFS)
+	{
+		fsAction(currentFS);
+	}
 
-}*/
+	/*~~GPS Actions~~*/
+	if (updateGPS(AISFCgps, lat_mdeg, long_mdeg, gnss_alt))				// <- if GPS has a fresh update, re-calculate distance and bearing from launch
+	{
+		distance_bearing(launch_Lat, launch_Long, lat_mdeg, long_mdeg);
+	}
+
+	//End of current Loop, prepair for next loop 
+	prevFS = currentFS;		
+}
+//
+//
+bool activateHardware()
+{
+	//AISFCAccel
+	bool accel_Flag{}, baro_Flag{}, altInd_Flag{}, statusInd_Flag{}, gps_Flag{};
+	for (int i = 0; i < 3; i++) //i < n, where n = number of components used
+	{
+		switch (i)
+		{
+		case 0:
+			//Accelerometer activation
+			if (!AISFC_Accel.begin(AISFCAccel_Address1))
+			{
+				Serial.println("Accelerometer failed to activate");
+				accel_Flag = false;
+			}
+			else
+			{
+				Serial.println("Accelerometer Activated");
+				accel_Flag = true;
+			}
+			continue;
+		case 1:
+			//barometer activation
+			if (!AISFC_Baro.begin())
+			{
+				Serial.println("Barometer failed to activate");
+				baro_Flag = false;
+			}
+			else
+			{
+				Serial.println("Barometer Activated");
+				zero_Alt = AISFC_Baro.zeroAlt();
+				Serial.print("Zeroed Altitude: ");
+				Serial.println(zero_Alt);
+				baro_Flag = true;
+			}
+			continue;
+		case 2:
+			//LED activation
+			if (!ledInit(AISFCAltIndicator))
+			{
+				Serial.println("Altitude Indicator failed to activate");
+				altInd_Flag = false;
+			}
+			else
+			{
+				Serial.println("Altitude Indicator Activated");
+				altInd_Flag = true;
+			}
+			if (!ledInit(ledStatusIndicator))
+			{
+				Serial.println("Status Indicator failed to activate");
+				statusInd_Flag = false;
+			}
+			else
+			{
+				Serial.println("Status Indicator Activated");
+				statusInd_Flag = true;
+			}
+			continue;
+		case 3:
+			//GPS Activation 
+			if (!initGPS(AISFCgps))
+			{
+				Serial.println("GPS failed to activate");
+				gps_Flag = false;
+			}
+			else
+			{
+				zeroLaunchSite(AISFCgps, launch_Lat, launch_Long);
+				Serial.println("GPS Activated");
+				gps_Flag = true;
+			}
+			continue;
+		case 4:
+			//telecoms actication
+			continue;
+		default:
+			continue;
+		}
+	}
+	if (accel_Flag == true && baro_Flag == true && altInd_Flag == true && statusInd_Flag == true && gps_Flag == true)
+	{
+		return true;
+	}
+	else
+	{
+		return false;
+	}
+}
+//
+//
+void fsAction(flightStatus currentFS)
+{
+	//bool drogueDep_Flag = false;
+	//bool mainDep_Flag = false;
+	switch (currentFS)
+	{
+	case 0:	//preLaunch,
+		AISFCStatusIndicator.setPixelColor(0, AISFCLED::cYellow);
+		break;
+	case 1:	//Boost,
+		AISFCStatusIndicator.setPixelColor(0, AISFCLED::cGreen);
+		break;
+	case 2:	//Coast,
+		AISFCStatusIndicator.setPixelColor(0, AISFCLED::cCyan);
+		break;
+	case 3:	//Apogee,
+		AISFCStatusIndicator.setPixelColor(0, AISFCLED::cWhite);
+		digitalWrite(drogueIgGate, LOW);
+		digitalWrite(drogueIgDrain, HIGH);
+		drogueDep_Flag = true;
+		break;
+	case 4:	//Drogue,
+		AISFCStatusIndicator.setPixelColor(0, AISFCLED::cBlue);
+		digitalWrite(drogueIgGate, HIGH);
+		digitalWrite(drogueIgDrain, HIGH);
+		break;
+	case 5:	//Main,
+		AISFCStatusIndicator.setPixelColor(0, AISFCLED::cMagenta);
+		digitalWrite(mainIgGate, LOW);
+		digitalWrite(mainIgDrain, HIGH);
+		mainDep_Flag = true;
+		break;
+	case 6:	//Landed
+		AISFCStatusIndicator.setPixelColor(0, AISFCLED::cYellow);
+		digitalWrite(mainIgGate, HIGH);
+		digitalWrite(mainIgDrain, LOW);		
+		break;
+	}
+}
